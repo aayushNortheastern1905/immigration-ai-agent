@@ -1,0 +1,174 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Immigration AI Agent Backend - Production Ready
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.11
+    MemorySize: 512
+    Environment:
+      Variables:
+        USERS_TABLE: !Ref UsersTable
+        POLICIES_TABLE: !Ref PoliciesTable
+        ENVIRONMENT: dev
+
+Resources:
+  # DynamoDB Tables
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: immigration-users
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: email-index
+          KeySchema:
+            - AttributeName: email
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: ImmigrationAI
+        - Key: Environment
+          Value: dev
+
+  PoliciesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: immigration-policies
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: policy_id
+          AttributeType: S
+        - AttributeName: published_date
+          AttributeType: S
+      KeySchema:
+        - AttributeName: policy_id
+          KeyType: HASH
+        - AttributeName: published_date
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: ImmigrationAI
+        - Key: Environment
+          Value: dev
+
+  # Lambda Functions
+  SignupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: immigration-ai-signup
+      CodeUri: lambdas/auth/
+      Handler: signup.lambda_handler
+      Description: Handles user signup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+      Events:
+        Signup:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /api/auth/signup
+            Method: post
+      Tags:
+        Project: ImmigrationAI
+        Function: Auth
+
+  LoginFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: immigration-ai-login
+      CodeUri: lambdas/auth/
+      Handler: login.lambda_handler
+      Description: Handles user login
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+      Events:
+        Login:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /api/auth/login
+            Method: post
+      Tags:
+        Project: ImmigrationAI
+        Function: Auth
+
+  GetPoliciesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: immigration-ai-get-policies
+      CodeUri: lambdas/policies/
+      Handler: get_policies.lambda_handler
+      Description: Retrieves immigration policy updates
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PoliciesTable
+      Events:
+        GetPolicies:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /api/policies
+            Method: get
+      Tags:
+        Project: ImmigrationAI
+        Function: Policies
+
+  # API Gateway with CORS enabled
+  ApiGatewayApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With'"
+        AllowOrigin: "'*'"
+
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL for Prod stage"
+    Value: !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+    Export:
+      Name: ImmigrationAI-ApiEndpoint
+  
+  UsersTableName:
+    Description: "DynamoDB Users table name"
+    Value: !Ref UsersTable
+    Export:
+      Name: ImmigrationAI-UsersTable
+  
+  PoliciesTableName:
+    Description: "DynamoDB Policies table name"
+    Value: !Ref PoliciesTable
+    Export:
+      Name: ImmigrationAI-PoliciesTable
+  
+  UsersTableArn:
+    Description: "DynamoDB Users table ARN"
+    Value: !GetAtt UsersTable.Arn
+    Export:
+      Name: ImmigrationAI-UsersTableArn
+  
+  PoliciesTableArn:
+    Description: "DynamoDB Policies table ARN"
+    Value: !GetAtt PoliciesTable.Arn
+    Export:
+      Name: ImmigrationAI-PoliciesTableArn
