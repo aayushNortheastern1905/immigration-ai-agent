@@ -13,7 +13,7 @@ backend/**/*.egg-info/
 # ===== FRONTEND (React) =====
 frontend/node_modules/
 frontend/build/
-frontend/.env
+frontend/.env.local
 frontend/.env.development.local
 frontend/.env.test.local
 frontend/.env.production.local
@@ -35,6 +35,8 @@ lerna-debug.log*
 .env
 .env.*
 !.env.example
+frontend/.env
+backend/.env
 
 # ===== BUILD ARTIFACTS =====
 dist/
@@ -78,7 +80,6 @@ bower_components/
 .vscode-test/
 
 # ===== KEEP THESE FILES =====
-!frontend/.env
 !backend/template.yaml
 !backend/lambdas/**/*.py
 !backend/lambdas/**/requirements.txt
