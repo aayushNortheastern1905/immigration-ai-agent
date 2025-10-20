@@ -1,13 +1,14 @@
 """
 User Login Lambda Function
-Handles user authentication and login tracking
+Handles user authentication and login tracking with JWT token generation
 """
 
 import json
 import boto3
 import os
 import hashlib
-from datetime import datetime
+import jwt
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 # Initialize DynamoDB
@@ -17,6 +18,20 @@ table = dynamodb.Table(os.environ.get('USERS_TABLE', 'immigration-users'))
 def hash_password(password):
     """Hash password using SHA-256"""
     return hashlib.sha256(password.encode()).hexdigest()
+
+def create_jwt_token(user_id: str, email: str) -> str:
+    """Create JWT token for authenticated user"""
+    jwt_secret = os.environ.get('JWT_SECRET', 'your-secret-key')
+    
+    payload = {
+        'user_id': user_id,
+        'email': email,
+        'iat': datetime.utcnow(),
+        'exp': datetime.utcnow() + timedelta(days=7)  # Token expires in 7 days
+    }
+    
+    token = jwt.encode(payload, jwt_secret, algorithm='HS256')
+    return token
 
 def create_response(status_code, body):
     """Create standardized API response"""
@@ -149,6 +164,9 @@ def lambda_handler(event, context):
         
         print(f"User logged in successfully: {user['user_id']} (Login #{new_login_count})")
         
+        # Generate JWT token
+        jwt_token = create_jwt_token(user['user_id'], user['email'])
+        
         # Remove sensitive data from response
         user_response = {
             'user_id': user['user_id'],
@@ -166,7 +184,8 @@ def lambda_handler(event, context):
             'message': 'Login successful',
             'data': {
                 'user': user_response,
-                'is_first_login': is_first_login
+                'is_first_login': is_first_login,
+                'token': jwt_token  # JWT token for authentication
             }
         })
         

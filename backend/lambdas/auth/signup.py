@@ -1,6 +1,6 @@
 """
 User Signup Lambda Function
-Handles new user registration with validation and password hashing
+Handles new user registration with validation, password hashing, and JWT token generation
 """
 
 import json
@@ -8,8 +8,9 @@ import boto3
 import os
 import uuid
 import hashlib
+import jwt
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 # Initialize DynamoDB
@@ -43,6 +44,20 @@ def hash_password(password):
     """Hash password using SHA-256"""
     return hashlib.sha256(password.encode()).hexdigest()
 
+def create_jwt_token(user_id: str, email: str) -> str:
+    """Create JWT token for new user"""
+    jwt_secret = os.environ.get('JWT_SECRET', 'your-secret-key')
+    
+    payload = {
+        'user_id': user_id,
+        'email': email,
+        'iat': datetime.utcnow(),
+        'exp': datetime.utcnow() + timedelta(days=7)  # Token expires in 7 days
+    }
+    
+    token = jwt.encode(payload, jwt_secret, algorithm='HS256')
+    return token
+
 def create_response(status_code, body):
     """Create standardized API response"""
     return {
@@ -69,7 +84,7 @@ def lambda_handler(event, context):
     }
     """
     try:
-        # Log the request (remove in production or sanitize)
+        # Log the request
         print(f"Signup request received: {event.get('requestContext', {}).get('requestId', 'N/A')}")
         
         # Parse request body
@@ -152,7 +167,6 @@ def lambda_handler(event, context):
                 })
         except Exception as e:
             print(f"Error checking existing user: {str(e)}")
-            # Continue anyway - might be first user
         
         # Create user
         user_id = str(uuid.uuid4())
@@ -176,6 +190,9 @@ def lambda_handler(event, context):
         
         print(f"User created successfully: {user_id}")
         
+        # Generate JWT token
+        jwt_token = create_jwt_token(user_id, email)
+        
         # Remove password hash from response
         user_response = {
             'user_id': user_id,
@@ -191,7 +208,8 @@ def lambda_handler(event, context):
             'success': True,
             'message': 'User created successfully',
             'data': {
-                'user': user_response
+                'user': user_response,
+                'token': jwt_token  # JWT token for immediate authentication
             }
         })
         
