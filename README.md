@@ -80,7 +80,7 @@ An AI-powered system that:
 - **Database:** DynamoDB (NoSQL)
 - **Storage:** Amazon S3
 - **IaC:** AWS SAM (Serverless Application Model)
-- **AI/ML:** OpenAI GPT-4 API
+- **AI/ML:** Google Gemini API
 
 ### Frontend
 - **Framework:** React 18 + TypeScript
