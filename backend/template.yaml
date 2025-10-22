@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Immigration AI Agent Backend - Production Ready with Authentication
+Description: Immigration AI Agent Backend - CORS Fixed
 
 Globals:
   Function:
@@ -11,15 +11,7 @@ Globals:
       Variables:
         USERS_TABLE: !Ref UsersTable
         POLICIES_TABLE: !Ref PoliciesTable
-        RATE_LIMIT_TABLE: !Ref RateLimitTable
-        JWT_SECRET: !Sub '{{resolve:secretsmanager:immigration-ai/jwt-secret}}'
         ENVIRONMENT: dev
-  Api:
-    Cors:
-      AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
-      AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With'"
-      AllowOrigin: "'*'"
-      AllowCredentials: false
 
 Resources:
   # DynamoDB Tables
@@ -43,15 +35,8 @@ Resources:
               KeyType: HASH
           Projection:
             ProjectionType: ALL
-      StreamSpecification:
-        StreamViewType: NEW_AND_OLD_IMAGES
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
-      Tags:
-        - Key: Project
-          Value: ImmigrationAI
-        - Key: Environment
-          Value: dev
 
   PoliciesTable:
     Type: AWS::DynamoDB::Table
@@ -73,40 +58,14 @@ Resources:
         Enabled: true
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
-      Tags:
-        - Key: Project
-          Value: ImmigrationAI
-        - Key: Environment
-          Value: dev
 
-  RateLimitTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: immigration-rate-limits
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: rate_limit_key
-          AttributeType: S
-      KeySchema:
-        - AttributeName: rate_limit_key
-          KeyType: HASH
-      TimeToLiveSpecification:
-        AttributeName: expires_at
-        Enabled: true
-      Tags:
-        - Key: Project
-          Value: ImmigrationAI
-        - Key: Environment
-          Value: dev
-
-  # Lambda Functions - Auth (No authentication required)
+  # Lambda Functions
   SignupFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: immigration-ai-signup
       CodeUri: lambdas/auth/
       Handler: signup.lambda_handler
-      Description: Handles user signup
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -117,11 +76,6 @@ Resources:
             RestApiId: !Ref ApiGatewayApi
             Path: /api/auth/signup
             Method: post
-            Auth:
-              Authorizer: NONE
-      Tags:
-        Project: ImmigrationAI
-        Function: Auth
 
   LoginFunction:
     Type: AWS::Serverless::Function
@@ -129,7 +83,6 @@ Resources:
       FunctionName: immigration-ai-login
       CodeUri: lambdas/auth/
       Handler: login.lambda_handler
-      Description: Handles user login
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -140,33 +93,18 @@ Resources:
             RestApiId: !Ref ApiGatewayApi
             Path: /api/auth/login
             Method: post
-            Auth:
-              Authorizer: NONE
-      Tags:
-        Project: ImmigrationAI
-        Function: Auth
 
-  # Lambda Functions - Protected (Require authentication)
   GetPoliciesFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: immigration-ai-get-policies
       CodeUri: lambdas/policies/
       Handler: get_policies.lambda_handler
-      Description: Retrieves immigration policy updates (PROTECTED)
       Layers:
         - !Ref SharedLibLayer
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref PoliciesTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref RateLimitTable
-        - Statement:
-          - Effect: Allow
-            Action:
-              - secretsmanager:GetSecretValue
-            Resource: 
-              - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:immigration-ai/jwt-secret*'
       Events:
         GetPolicies:
           Type: Api
@@ -174,11 +112,6 @@ Resources:
             RestApiId: !Ref ApiGatewayApi
             Path: /api/policies
             Method: get
-            Auth:
-              Authorizer: JWTAuthorizer
-      Tags:
-        Project: ImmigrationAI
-        Function: Policies
 
   ScrapePoliciesFunction:
     Type: AWS::Serverless::Function
@@ -186,7 +119,6 @@ Resources:
       FunctionName: immigration-ai-scrape-policies
       CodeUri: lambdas/policies/
       Handler: scrape_policies.lambda_handler
-      Description: Scrapes USCIS and analyzes policies with Google Gemini AI (PROTECTED)
       Timeout: 300
       MemorySize: 1024
       Environment:
@@ -197,21 +129,12 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref PoliciesTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref RateLimitTable
         - Statement:
           - Effect: Allow
             Action:
               - secretsmanager:GetSecretValue
             Resource: 
               - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:immigration-ai/gemini-key*'
-              - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:immigration-ai/jwt-secret*'
-          - Effect: Allow
-            Action:
-              - logs:CreateLogGroup
-              - logs:CreateLogStream
-              - logs:PutLogEvents
-            Resource: '*'
       Events:
         ManualInvoke:
           Type: Api
@@ -219,146 +142,42 @@ Resources:
             RestApiId: !Ref ApiGatewayApi
             Path: /api/policies/scrape
             Method: post
-            Auth:
-              Authorizer: JWTAuthorizer
-      Tags:
-        Project: ImmigrationAI
-        Function: Scraper
 
-  # JWT Authorizer Lambda
-  JWTAuthorizerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: immigration-ai-jwt-authorizer
-      CodeUri: lambdas/auth/
-      Handler: authorizer.lambda_handler
-      Description: JWT token validation for API Gateway
-      Timeout: 10
-      Environment:
-        Variables:
-          JWT_SECRET: !Sub '{{resolve:secretsmanager:immigration-ai/jwt-secret}}'
-      Policies:
-        - Statement:
-          - Effect: Allow
-            Action:
-              - secretsmanager:GetSecretValue
-            Resource: 
-              - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:immigration-ai/jwt-secret*'
-      Tags:
-        Project: ImmigrationAI
-        Function: Auth
-
-  # Lambda Layer for shared lib
   SharedLibLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
       LayerName: immigration-ai-shared-lib
-      Description: Shared library code (errors, logger, validators, AI client, scraper)
       ContentUri: lambdas/lib/
       CompatibleRuntimes:
         - python3.11
-      RetentionPolicy: Retain
 
-  # API Gateway with JWT Authorizer
   ApiGatewayApi:
     Type: AWS::Serverless::Api
     Properties:
       Name: immigration-ai-api
       StageName: Prod
-      Auth:
-        Authorizers:
-          JWTAuthorizer:
-            FunctionArn: !GetAtt JWTAuthorizerFunction.Arn
-            FunctionPayloadType: REQUEST
-            Identity:
-              Headers:
-                - Authorization
-              ReauthorizeEvery: 300
-        DefaultAuthorizer: JWTAuthorizer
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With,Accept'"
+        AllowOrigin: "'*'"
+        AllowCredentials: false
       GatewayResponses:
         DEFAULT_4XX:
           ResponseParameters:
             Headers:
               Access-Control-Allow-Origin: "'*'"
-              Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With'"
+              Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With,Accept'"
               Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
         DEFAULT_5XX:
           ResponseParameters:
             Headers:
               Access-Control-Allow-Origin: "'*'"
-              Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With'"
+              Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With,Accept'"
               Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
-      Tags:
-        Project: ImmigrationAI
-
-  # CloudWatch Alarms
-  ScraperErrorAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: immigration-ai-scraper-errors
-      AlarmDescription: Alert when scraper Lambda has errors
-      MetricName: Errors
-      Namespace: AWS/Lambda
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 3
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: FunctionName
-          Value: !Ref ScrapePoliciesFunction
-      TreatMissingData: notBreaching
-
-  AuthorizerErrorAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: immigration-ai-authorizer-errors
-      AlarmDescription: Alert when JWT authorizer has errors
-      MetricName: Errors
-      Namespace: AWS/Lambda
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 10
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: FunctionName
-          Value: !Ref JWTAuthorizerFunction
-      TreatMissingData: notBreaching
 
 Outputs:
   ApiEndpoint:
-    Description: "API Gateway endpoint URL for Prod stage"
     Value: !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
-    Export:
-      Name: ImmigrationAI-ApiEndpoint
-  
-  ScraperEndpoint:
-    Description: "Manual scraper trigger endpoint (PROTECTED - requires JWT)"
-    Value: !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/api/policies/scrape"
-    Export:
-      Name: ImmigrationAI-ScraperEndpoint
-  
-  UsersTableName:
-    Description: "DynamoDB Users table name"
-    Value: !Ref UsersTable
-    Export:
-      Name: ImmigrationAI-UsersTable
   
   PoliciesTableName:
-    Description: "DynamoDB Policies table name"
     Value: !Ref PoliciesTable
-    Export:
-      Name: ImmigrationAI-PoliciesTable
-  
-  RateLimitTableName:
-    Description: "DynamoDB Rate Limit table name"
-    Value: !Ref RateLimitTable
-    Export:
-      Name: ImmigrationAI-RateLimitTable
-  
-  SharedLibLayerArn:
-    Description: "Shared library Lambda Layer ARN"
-    Value: !Ref SharedLibLayer
-    Export:
-      Name: ImmigrationAI-SharedLibLayer

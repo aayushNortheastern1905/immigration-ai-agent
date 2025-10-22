@@ -17,7 +17,6 @@ from decimal import Decimal
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ.get('USERS_TABLE', 'immigration-users'))
 
-# Allowed visa types
 ALLOWED_VISA_TYPES = ['F-1', 'OPT', 'H-1B', 'L-1', 'O-1']
 
 def validate_email(email):
@@ -26,10 +25,7 @@ def validate_email(email):
     return re.match(pattern, email) is not None
 
 def validate_password(password):
-    """
-    Validate password strength
-    Requirements: Min 8 chars, at least 1 uppercase, 1 lowercase, 1 number
-    """
+    """Validate password strength"""
     if len(password) < 8:
         return False, "Password must be at least 8 characters long"
     if not re.search(r'[A-Z]', password):
@@ -52,42 +48,36 @@ def create_jwt_token(user_id: str, email: str) -> str:
         'user_id': user_id,
         'email': email,
         'iat': datetime.utcnow(),
-        'exp': datetime.utcnow() + timedelta(days=7)  # Token expires in 7 days
+        'exp': datetime.utcnow() + timedelta(days=7)
     }
     
     token = jwt.encode(payload, jwt_secret, algorithm='HS256')
     return token
 
 def create_response(status_code, body):
-    """Create standardized API response"""
+    """Create standardized API response with CORS headers"""
     return {
         'statusCode': status_code,
         'headers': {
             'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With',
-            'Access-Control-Allow-Methods': 'POST,OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With',
+            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+            'Access-Control-Allow-Credentials': 'false',
             'Content-Type': 'application/json'
         },
         'body': json.dumps(body, default=str)
     }
 
 def lambda_handler(event, context):
-    """
-    Main Lambda handler for user signup
+    """Main Lambda handler for user signup"""
     
-    Expected body:
-    {
-        "email": "user@example.com",
-        "password": "SecurePass123",
-        "full_name": "John Doe",
-        "visa_type": "F-1"
-    }
-    """
+    # Handle OPTIONS preflight request
+    if event.get('httpMethod') == 'OPTIONS':
+        return create_response(200, {'message': 'OK'})
+    
     try:
-        # Log the request
         print(f"Signup request received: {event.get('requestContext', {}).get('requestId', 'N/A')}")
         
-        # Parse request body
         if not event.get('body'):
             return create_response(400, {
                 'success': False,
@@ -99,13 +89,11 @@ def lambda_handler(event, context):
         
         body = json.loads(event['body'])
         
-        # Extract and validate required fields
         email = body.get('email', '').strip().lower()
         password = body.get('password', '')
         full_name = body.get('full_name', '').strip()
         visa_type = body.get('visa_type', 'F-1').strip()
         
-        # Validate required fields
         if not email or not password or not full_name:
             return create_response(400, {
                 'success': False,
@@ -115,7 +103,6 @@ def lambda_handler(event, context):
                 }
             })
         
-        # Validate email format
         if not validate_email(email):
             return create_response(400, {
                 'success': False,
@@ -125,7 +112,6 @@ def lambda_handler(event, context):
                 }
             })
         
-        # Validate password strength
         is_valid, message = validate_password(password)
         if not is_valid:
             return create_response(400, {
@@ -136,7 +122,6 @@ def lambda_handler(event, context):
                 }
             })
         
-        # Validate visa type
         if visa_type not in ALLOWED_VISA_TYPES:
             return create_response(400, {
                 'success': False,
@@ -146,7 +131,6 @@ def lambda_handler(event, context):
                 }
             })
         
-        # Check if user already exists
         try:
             response = table.query(
                 IndexName='email-index',
@@ -168,7 +152,6 @@ def lambda_handler(event, context):
         except Exception as e:
             print(f"Error checking existing user: {str(e)}")
         
-        # Create user
         user_id = str(uuid.uuid4())
         timestamp = datetime.utcnow().isoformat() + 'Z'
         password_hash = hash_password(password)
@@ -185,15 +168,12 @@ def lambda_handler(event, context):
             'is_active': True
         }
         
-        # Save to DynamoDB
         table.put_item(Item=user_data)
         
         print(f"User created successfully: {user_id}")
         
-        # Generate JWT token
         jwt_token = create_jwt_token(user_id, email)
         
-        # Remove password hash from response
         user_response = {
             'user_id': user_id,
             'email': email,
@@ -209,7 +189,7 @@ def lambda_handler(event, context):
             'message': 'User created successfully',
             'data': {
                 'user': user_response,
-                'token': jwt_token  # JWT token for immediate authentication
+                'token': jwt_token
             }
         })
         

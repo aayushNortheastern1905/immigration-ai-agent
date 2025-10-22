@@ -27,40 +27,36 @@ def create_jwt_token(user_id: str, email: str) -> str:
         'user_id': user_id,
         'email': email,
         'iat': datetime.utcnow(),
-        'exp': datetime.utcnow() + timedelta(days=7)  # Token expires in 7 days
+        'exp': datetime.utcnow() + timedelta(days=7)
     }
     
     token = jwt.encode(payload, jwt_secret, algorithm='HS256')
     return token
 
 def create_response(status_code, body):
-    """Create standardized API response"""
+    """Create standardized API response with CORS headers"""
     return {
         'statusCode': status_code,
         'headers': {
             'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With',
-            'Access-Control-Allow-Methods': 'POST,OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With',
+            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+            'Access-Control-Allow-Credentials': 'false',
             'Content-Type': 'application/json'
         },
         'body': json.dumps(body, default=str)
     }
 
 def lambda_handler(event, context):
-    """
-    Main Lambda handler for user login
+    """Main Lambda handler for user login"""
     
-    Expected body:
-    {
-        "email": "user@example.com",
-        "password": "SecurePass123"
-    }
-    """
+    # Handle OPTIONS preflight request
+    if event.get('httpMethod') == 'OPTIONS':
+        return create_response(200, {'message': 'OK'})
+    
     try:
-        # Log the request
         print(f"Login request received: {event.get('requestContext', {}).get('requestId', 'N/A')}")
         
-        # Parse request body
         if not event.get('body'):
             return create_response(400, {
                 'success': False,
@@ -72,11 +68,9 @@ def lambda_handler(event, context):
         
         body = json.loads(event['body'])
         
-        # Extract credentials
         email = body.get('email', '').strip().lower()
         password = body.get('password', '')
         
-        # Validate required fields
         if not email or not password:
             return create_response(400, {
                 'success': False,
@@ -86,10 +80,8 @@ def lambda_handler(event, context):
                 }
             })
         
-        # Hash password
         password_hash = hash_password(password)
         
-        # Find user by email
         try:
             response = table.query(
                 IndexName='email-index',
@@ -121,7 +113,6 @@ def lambda_handler(event, context):
                 }
             })
         
-        # Verify password
         if user.get('password_hash') != password_hash:
             return create_response(401, {
                 'success': False,
@@ -131,7 +122,6 @@ def lambda_handler(event, context):
                 }
             })
         
-        # Check if account is active
         if not user.get('is_active', True):
             return create_response(403, {
                 'success': False,
@@ -141,7 +131,6 @@ def lambda_handler(event, context):
                 }
             })
         
-        # Update login tracking
         current_login_count = int(user.get('login_count', 0))
         new_login_count = current_login_count + 1
         timestamp = datetime.utcnow().isoformat() + 'Z'
@@ -157,17 +146,13 @@ def lambda_handler(event, context):
             )
         except Exception as e:
             print(f"Error updating login tracking: {str(e)}")
-            # Continue anyway - login still successful
         
-        # Check if first login
         is_first_login = (current_login_count == 0)
         
         print(f"User logged in successfully: {user['user_id']} (Login #{new_login_count})")
         
-        # Generate JWT token
         jwt_token = create_jwt_token(user['user_id'], user['email'])
         
-        # Remove sensitive data from response
         user_response = {
             'user_id': user['user_id'],
             'email': user['email'],
@@ -185,7 +170,7 @@ def lambda_handler(event, context):
             'data': {
                 'user': user_response,
                 'is_first_login': is_first_login,
-                'token': jwt_token  # JWT token for authentication
+                'token': jwt_token
             }
         })
         
