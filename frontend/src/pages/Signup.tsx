@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Lock, User, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Mail, Lock, User, CheckCircle2, AlertCircle, ArrowLeft } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://9uqxq6pvjj.execute-api.us-east-1.amazonaws.com/Prod';
 
@@ -87,6 +87,15 @@ const Signup = () => {
         </div>
 
         <div className="w-full max-w-md relative z-10">
+          {/* Back Button */}
+          <button
+            onClick={() => window.location.href = '/'}
+            className="inline-flex items-center gap-2 text-slate-600 hover:text-blue-600 transition-colors mb-6 group"
+          >
+            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+            <span className="font-medium">Back to Home</span>
+          </button>
+
           {/* Logo */}
           <div className="mb-8">
             <div className="text-3xl font-bold cursor-pointer" onClick={() => window.location.href = '/'}>
