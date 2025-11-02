@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Immigration AI Agent Backend - CORS Fixed
+Description: Immigration AI Agent Backend - With Document Processing
 
 Globals:
   Function:
@@ -11,10 +11,15 @@ Globals:
       Variables:
         USERS_TABLE: !Ref UsersTable
         POLICIES_TABLE: !Ref PoliciesTable
+        DOCUMENTS_TABLE: !Ref DocumentsTable
+        DOCUMENTS_BUCKET: !Sub 'immigration-ai-documents-${AWS::AccountId}'
         ENVIRONMENT: dev
 
 Resources:
-  # DynamoDB Tables
+  # ============================================
+  # DYNAMODB TABLES
+  # ============================================
+  
   UsersTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -59,7 +64,53 @@ Resources:
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
 
-  # Lambda Functions
+  DocumentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: immigration-documents
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: document_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: document_id
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # ============================================
+  # S3 BUCKET FOR DOCUMENTS (WITHOUT NOTIFICATION YET)
+  # ============================================
+  
+  DocumentsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'immigration-ai-documents-${AWS::AccountId}'
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: ['*']
+            AllowedMethods: [GET, PUT, POST, DELETE]
+            AllowedHeaders: ['*']
+            MaxAge: 3000
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldDocuments
+            Status: Enabled
+            ExpirationInDays: 90
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ============================================
+  # AUTH LAMBDA FUNCTIONS
+  # ============================================
+  
   SignupFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -94,6 +145,10 @@ Resources:
             Path: /api/auth/login
             Method: post
 
+  # ============================================
+  # POLICY LAMBDA FUNCTIONS
+  # ============================================
+  
   GetPoliciesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -143,6 +198,91 @@ Resources:
             Path: /api/policies/scrape
             Method: post
 
+  # ============================================
+  # DOCUMENT PROCESSING LAMBDA FUNCTIONS
+  # ============================================
+  
+  UploadDocumentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: immigration-ai-upload-document
+      CodeUri: lambdas/documents/
+      Handler: upload.lambda_handler
+      Timeout: 30
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref DocumentsBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DocumentsTable
+      Events:
+        Upload:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /api/documents/upload
+            Method: post
+
+  ProcessDocumentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: immigration-ai-process-document
+      CodeUri: lambdas/documents/
+      Handler: process.lambda_handler
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          GEMINI_API_KEY: !Sub '{{resolve:secretsmanager:immigration-ai/gemini-key}}'
+      Layers:
+        - !Ref SharedLibLayer
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref DocumentsBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DocumentsTable
+        - Statement:
+          - Effect: Allow
+            Action:
+              - textract:AnalyzeDocument
+              - textract:DetectDocumentText
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: 
+              - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:immigration-ai/gemini-key*'
+
+  # Permission for S3 to invoke ProcessDocument Lambda
+  ProcessDocumentInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ProcessDocumentFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !GetAtt DocumentsBucket.Arn
+
+  GetDocumentStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: immigration-ai-get-document-status
+      CodeUri: lambdas/documents/
+      Handler: get_status.lambda_handler
+      Timeout: 10
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref DocumentsTable
+      Events:
+        GetStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /api/documents/{document_id}/status
+            Method: get
+
+  # ============================================
+  # LAMBDA LAYER
+  # ============================================
+  
   SharedLibLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
@@ -151,6 +291,10 @@ Resources:
       CompatibleRuntimes:
         - python3.11
 
+  # ============================================
+  # API GATEWAY
+  # ============================================
+  
   ApiGatewayApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -175,9 +319,27 @@ Resources:
               Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With,Accept'"
               Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
 
+# ============================================
+# OUTPUTS
+# ============================================
+
 Outputs:
   ApiEndpoint:
+    Description: API Gateway endpoint URL
     Value: !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
   
   PoliciesTableName:
+    Description: Policies DynamoDB table name
     Value: !Ref PoliciesTable
+  
+  DocumentsTableName:
+    Description: Documents DynamoDB table name
+    Value: !Ref DocumentsTable
+  
+  DocumentsBucketName:
+    Description: Documents S3 bucket name
+    Value: !Ref DocumentsBucket
+  
+  ProcessDocumentFunctionArn:
+    Description: Process Document Lambda ARN (for manual S3 notification setup)
+    Value: !GetAtt ProcessDocumentFunction.Arn
