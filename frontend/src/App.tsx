@@ -4,9 +4,10 @@ import Landing from './pages/Landing';
 import Signup from './pages/Signup';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import DocumentsPage from './pages/DocumentsPage';
 
 function App() {
-  // Check if user is logged in (simple check for MVP)
+  // Check if user is logged in
   const isAuthenticated = () => {
     return localStorage.getItem('user') !== null;
   };
@@ -28,6 +29,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Dashboard />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/documents" 
+            element={
+              <ProtectedRoute>
+                <DocumentsPage />
               </ProtectedRoute>
             } 
           />

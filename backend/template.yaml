@@ -83,7 +83,7 @@ Resources:
         PointInTimeRecoveryEnabled: true
 
   # ============================================
-  # S3 BUCKET FOR DOCUMENTS (WITHOUT NOTIFICATION YET)
+  # S3 BUCKET FOR DOCUMENTS - NO NOTIFICATION YET
   # ============================================
   
   DocumentsBucket:
@@ -252,7 +252,6 @@ Resources:
             Resource: 
               - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:immigration-ai/gemini-key*'
 
-  # Permission for S3 to invoke ProcessDocument Lambda
   ProcessDocumentInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -279,6 +278,115 @@ Resources:
             Path: /api/documents/{document_id}/status
             Method: get
 
+  GetDocumentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: immigration-ai-get-documents
+      CodeUri: lambdas/documents/
+      Handler: get_documents.lambda_handler
+      Timeout: 10
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref DocumentsTable
+      Events:
+        GetDocuments:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /api/documents
+            Method: get
+
+  # ============================================
+  # S3 BUCKET NOTIFICATION - SEPARATE RESOURCE
+  # ============================================
+  
+  S3BucketNotification:
+    Type: Custom::S3BucketNotification
+    DependsOn:
+      - ProcessDocumentInvokePermission
+    Properties:
+      ServiceToken: !GetAtt S3NotificationFunction.Arn
+      BucketName: !Ref DocumentsBucket
+      LambdaFunctionArn: !GetAtt ProcessDocumentFunction.Arn
+
+  S3NotificationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: immigration-ai-s3-notification-handler
+      Runtime: python3.11
+      Handler: index.handler
+      Timeout: 60
+      Role: !GetAtt S3NotificationFunctionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+          
+          s3 = boto3.client('s3')
+          
+          def handler(event, context):
+              print(f"Event: {json.dumps(event)}")
+              
+              try:
+                  request_type = event['RequestType']
+                  properties = event['ResourceProperties']
+                  bucket_name = properties['BucketName']
+                  lambda_arn = properties['LambdaFunctionArn']
+                  
+                  if request_type in ['Create', 'Update']:
+                      # Add S3 notification
+                      s3.put_bucket_notification_configuration(
+                          Bucket=bucket_name,
+                          NotificationConfiguration={
+                              'LambdaFunctionConfigurations': [
+                                  {
+                                      'LambdaFunctionArn': lambda_arn,
+                                      'Events': ['s3:ObjectCreated:*']
+                                  }
+                              ]
+                          }
+                      )
+                      print(f"✓ S3 notification configured for {bucket_name}")
+                  
+                  elif request_type == 'Delete':
+                      # Remove notification on stack delete
+                      s3.put_bucket_notification_configuration(
+                          Bucket=bucket_name,
+                          NotificationConfiguration={}
+                      )
+                      print(f"✓ S3 notification removed for {bucket_name}")
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              
+              except Exception as e:
+                  print(f"ERROR: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+
+  S3NotificationFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: immigration-ai-s3-notification-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3NotificationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutBucketNotification
+                  - s3:GetBucketNotification
+                Resource: !GetAtt DocumentsBucket.Arn
+
   # ============================================
   # LAMBDA LAYER
   # ============================================
@@ -292,7 +400,7 @@ Resources:
         - python3.11
 
   # ============================================
-  # API GATEWAY
+  # API GATEWAY - CORS FIX APPLIED
   # ============================================
   
   ApiGatewayApi:
@@ -302,21 +410,22 @@ Resources:
       StageName: Prod
       Cors:
         AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
-        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With,Accept'"
+        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With,Accept,x-user-email,x-auth-token,X-User-Email,X-Auth-Token'"
         AllowOrigin: "'*'"
         AllowCredentials: false
+        MaxAge: "'600'"
       GatewayResponses:
         DEFAULT_4XX:
           ResponseParameters:
             Headers:
               Access-Control-Allow-Origin: "'*'"
-              Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With,Accept'"
+              Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With,Accept,x-user-email,x-auth-token,X-User-Email,X-Auth-Token'"
               Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
         DEFAULT_5XX:
           ResponseParameters:
             Headers:
               Access-Control-Allow-Origin: "'*'"
-              Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With,Accept'"
+              Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With,Accept,x-user-email,x-auth-token,X-User-Email,X-Auth-Token'"
               Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
 
 # ============================================
@@ -341,5 +450,5 @@ Outputs:
     Value: !Ref DocumentsBucket
   
   ProcessDocumentFunctionArn:
-    Description: Process Document Lambda ARN (for manual S3 notification setup)
+    Description: Process Document Lambda ARN
     Value: !GetAtt ProcessDocumentFunction.Arn

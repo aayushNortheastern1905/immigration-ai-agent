@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, LogOut, FileText, Calendar, Upload, Filter, ChevronDown, ChevronUp, TrendingUp, AlertCircle, CheckCircle2, User } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Bell, LogOut, FileText, Calendar, Upload, Filter, ChevronDown, ChevronUp, TrendingUp, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_API_URL || 'https://9uqxq6pvjj.execute-api.us-east-1.amazonaws.com/Prod';
 
@@ -22,13 +23,13 @@ interface Policy {
 }
 
 const Dashboard = () => {
+  const navigate = useNavigate();
   const [user, setUser] = useState<UserData | null>(null);
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [filteredPolicies, setFilteredPolicies] = useState<Policy[]>([]);
   const [loading, setLoading] = useState(true);
   const [isFirstLogin, setIsFirstLogin] = useState(false);
   
-  // Filter states
   const [selectedVisaType, setSelectedVisaType] = useState<string>('All');
   const [selectedImpact, setSelectedImpact] = useState<string>('All');
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
@@ -96,7 +97,7 @@ const Dashboard = () => {
   const handleLogout = () => {
     localStorage.removeItem('user');
     localStorage.removeItem('is_first_login');
-    window.location.href = '/login';
+    navigate('/login');
   };
 
   const getImpactStyles = (level: string) => {
@@ -131,19 +132,25 @@ const Dashboard = () => {
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-12">
-              <div className="text-2xl font-bold">
+              <div className="text-2xl font-bold cursor-pointer" onClick={() => navigate('/dashboard')}>
                 <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
                   DocuPal
                 </span>
               </div>
               <div className="hidden md:flex gap-8">
-                <button className="text-blue-600 font-semibold border-b-2 border-blue-600 pb-1">
+                <button 
+                  onClick={() => navigate('/dashboard')}
+                  className="text-blue-600 font-semibold border-b-2 border-blue-600 pb-1"
+                >
                   Dashboard
                 </button>
                 <button className="text-slate-600 hover:text-blue-600 transition-colors">
                   Policies
                 </button>
-                <button className="text-slate-600 hover:text-blue-600 transition-colors">
+                <button 
+                  onClick={() => navigate('/documents')}
+                  className="text-slate-600 hover:text-blue-600 transition-colors"
+                >
                   Documents
                 </button>
                 <button className="text-slate-600 hover:text-blue-600 transition-colors">
@@ -198,7 +205,10 @@ const Dashboard = () => {
                   Let's get started!
                 </p>
                 <div className="flex gap-4">
-                  <button className="px-8 py-4 bg-white text-blue-600 rounded-xl font-semibold hover:shadow-2xl hover:shadow-white/20 transition-all transform hover:scale-105">
+                  <button 
+                    onClick={() => navigate('/documents')}
+                    className="px-8 py-4 bg-white text-blue-600 rounded-xl font-semibold hover:shadow-2xl hover:shadow-white/20 transition-all transform hover:scale-105"
+                  >
                     Upload Your I-20
                   </button>
                   <button className="px-8 py-4 bg-white/20 backdrop-blur-sm text-white rounded-xl font-semibold hover:bg-white/30 transition-all border border-white/30">
@@ -221,7 +231,7 @@ const Dashboard = () => {
           )}
         </div>
 
-        {/* Stats Grid - Bento Box Style */}
+        {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
           <div className="bg-white rounded-2xl p-6 border border-slate-200 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer">
             <div className="flex items-center justify-between mb-4">
@@ -249,13 +259,19 @@ const Dashboard = () => {
             <div className="text-sm text-slate-600">Upcoming Deadlines</div>
           </div>
 
-          <div className="bg-white rounded-2xl p-6 border border-slate-200 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer">
+          <div 
+            onClick={() => {
+              console.log('DOCUMENTS CLICKED!');
+              navigate('/documents');
+            }}
+            className="bg-white rounded-2xl p-6 border border-slate-200 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer"
+          >
             <div className="flex items-center justify-between mb-4">
               <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
                 <Upload className="w-6 h-6 text-purple-600" />
               </div>
-              <span className="text-xs font-medium text-slate-400 bg-slate-50 px-3 py-1 rounded-full">
-                Upload
+              <span className="text-xs font-medium text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                Upload Now →
               </span>
             </div>
             <div className="text-3xl font-bold text-slate-900 mb-1">0</div>
@@ -300,7 +316,6 @@ const Dashboard = () => {
               <span className="text-sm font-medium text-slate-600">Filter by:</span>
             </div>
             
-            {/* Visa Type Chips */}
             <div className="flex gap-2">
               {visaTypes.map((type) => (
                 <button
@@ -319,7 +334,6 @@ const Dashboard = () => {
 
             <div className="h-6 w-px bg-slate-200"></div>
 
-            {/* Impact Level Filters */}
             <div className="flex gap-2">
               {impactLevels.map((level) => (
                 <button
