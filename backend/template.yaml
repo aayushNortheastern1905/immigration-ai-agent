@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Immigration AI Agent Backend - With Document Processing
+Description: Immigration AI Agent Backend
 
 Globals:
   Function:
@@ -14,6 +14,11 @@ Globals:
         DOCUMENTS_TABLE: !Ref DocumentsTable
         DOCUMENTS_BUCKET: !Sub 'immigration-ai-documents-${AWS::AccountId}'
         ENVIRONMENT: dev
+  Api:
+    Cors:
+      AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+      AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With'"
+      AllowOrigin: "'*'"
 
 Resources:
   # ============================================
@@ -40,8 +45,6 @@ Resources:
               KeyType: HASH
           Projection:
             ProjectionType: ALL
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
 
   PoliciesTable:
     Type: AWS::DynamoDB::Table
@@ -58,11 +61,6 @@ Resources:
           KeyType: HASH
         - AttributeName: published_date
           KeyType: RANGE
-      TimeToLiveSpecification:
-        AttributeName: expires_at
-        Enabled: true
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
 
   DocumentsTable:
     Type: AWS::DynamoDB::Table
@@ -79,11 +77,9 @@ Resources:
           KeyType: HASH
         - AttributeName: document_id
           KeyType: RANGE
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
 
   # ============================================
-  # S3 BUCKET FOR DOCUMENTS - NO NOTIFICATION YET
+  # S3 BUCKET
   # ============================================
   
   DocumentsBucket:
@@ -93,19 +89,9 @@ Resources:
       CorsConfiguration:
         CorsRules:
           - AllowedOrigins: ['*']
-            AllowedMethods: [GET, PUT, POST, DELETE]
+            AllowedMethods: [GET, PUT, POST]
             AllowedHeaders: ['*']
             MaxAge: 3000
-      LifecycleConfiguration:
-        Rules:
-          - Id: DeleteOldDocuments
-            Status: Enabled
-            ExpirationInDays: 90
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
 
   # ============================================
   # AUTH LAMBDA FUNCTIONS
@@ -121,10 +107,9 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
       Events:
-        Signup:
+        SignupApi:
           Type: Api
           Properties:
-            RestApiId: !Ref ApiGatewayApi
             Path: /api/auth/signup
             Method: post
 
@@ -138,10 +123,9 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
       Events:
-        Login:
+        LoginApi:
           Type: Api
           Properties:
-            RestApiId: !Ref ApiGatewayApi
             Path: /api/auth/login
             Method: post
 
@@ -161,10 +145,9 @@ Resources:
         - DynamoDBReadPolicy:
             TableName: !Ref PoliciesTable
       Events:
-        GetPolicies:
+        GetPoliciesApi:
           Type: Api
           Properties:
-            RestApiId: !Ref ApiGatewayApi
             Path: /api/policies
             Method: get
 
@@ -191,10 +174,9 @@ Resources:
             Resource: 
               - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:immigration-ai/gemini-key*'
       Events:
-        ManualInvoke:
+        ScrapeApi:
           Type: Api
           Properties:
-            RestApiId: !Ref ApiGatewayApi
             Path: /api/policies/scrape
             Method: post
 
@@ -208,17 +190,15 @@ Resources:
       FunctionName: immigration-ai-upload-document
       CodeUri: lambdas/documents/
       Handler: upload.lambda_handler
-      Timeout: 30
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref DocumentsBucket
         - DynamoDBCrudPolicy:
             TableName: !Ref DocumentsTable
       Events:
-        Upload:
+        UploadApi:
           Type: Api
           Properties:
-            RestApiId: !Ref ApiGatewayApi
             Path: /api/documents/upload
             Method: post
 
@@ -266,15 +246,13 @@ Resources:
       FunctionName: immigration-ai-get-document-status
       CodeUri: lambdas/documents/
       Handler: get_status.lambda_handler
-      Timeout: 10
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref DocumentsTable
       Events:
-        GetStatus:
+        GetStatusApi:
           Type: Api
           Properties:
-            RestApiId: !Ref ApiGatewayApi
             Path: /api/documents/{document_id}/status
             Method: get
 
@@ -284,108 +262,15 @@ Resources:
       FunctionName: immigration-ai-get-documents
       CodeUri: lambdas/documents/
       Handler: get_documents.lambda_handler
-      Timeout: 10
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref DocumentsTable
       Events:
-        GetDocuments:
+        GetDocumentsApi:
           Type: Api
           Properties:
-            RestApiId: !Ref ApiGatewayApi
             Path: /api/documents
             Method: get
-
-  # ============================================
-  # S3 BUCKET NOTIFICATION - SEPARATE RESOURCE
-  # ============================================
-  
-  S3BucketNotification:
-    Type: Custom::S3BucketNotification
-    DependsOn:
-      - ProcessDocumentInvokePermission
-    Properties:
-      ServiceToken: !GetAtt S3NotificationFunction.Arn
-      BucketName: !Ref DocumentsBucket
-      LambdaFunctionArn: !GetAtt ProcessDocumentFunction.Arn
-
-  S3NotificationFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: immigration-ai-s3-notification-handler
-      Runtime: python3.11
-      Handler: index.handler
-      Timeout: 60
-      Role: !GetAtt S3NotificationFunctionRole.Arn
-      Code:
-        ZipFile: |
-          import json
-          import boto3
-          import cfnresponse
-          
-          s3 = boto3.client('s3')
-          
-          def handler(event, context):
-              print(f"Event: {json.dumps(event)}")
-              
-              try:
-                  request_type = event['RequestType']
-                  properties = event['ResourceProperties']
-                  bucket_name = properties['BucketName']
-                  lambda_arn = properties['LambdaFunctionArn']
-                  
-                  if request_type in ['Create', 'Update']:
-                      # Add S3 notification
-                      s3.put_bucket_notification_configuration(
-                          Bucket=bucket_name,
-                          NotificationConfiguration={
-                              'LambdaFunctionConfigurations': [
-                                  {
-                                      'LambdaFunctionArn': lambda_arn,
-                                      'Events': ['s3:ObjectCreated:*']
-                                  }
-                              ]
-                          }
-                      )
-                      print(f"✓ S3 notification configured for {bucket_name}")
-                  
-                  elif request_type == 'Delete':
-                      # Remove notification on stack delete
-                      s3.put_bucket_notification_configuration(
-                          Bucket=bucket_name,
-                          NotificationConfiguration={}
-                      )
-                      print(f"✓ S3 notification removed for {bucket_name}")
-                  
-                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
-              
-              except Exception as e:
-                  print(f"ERROR: {str(e)}")
-                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
-
-  S3NotificationFunctionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: immigration-ai-s3-notification-role
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: S3NotificationPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:PutBucketNotification
-                  - s3:GetBucketNotification
-                Resource: !GetAtt DocumentsBucket.Arn
 
   # ============================================
   # LAMBDA LAYER
@@ -398,35 +283,7 @@ Resources:
       ContentUri: lambdas/lib/
       CompatibleRuntimes:
         - python3.11
-
-  # ============================================
-  # API GATEWAY - CORS FIX APPLIED
-  # ============================================
-  
-  ApiGatewayApi:
-    Type: AWS::Serverless::Api
-    Properties:
-      Name: immigration-ai-api
-      StageName: Prod
-      Cors:
-        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
-        AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With,Accept,x-user-email,x-auth-token,X-User-Email,X-Auth-Token'"
-        AllowOrigin: "'*'"
-        AllowCredentials: false
-        MaxAge: "'600'"
-      GatewayResponses:
-        DEFAULT_4XX:
-          ResponseParameters:
-            Headers:
-              Access-Control-Allow-Origin: "'*'"
-              Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With,Accept,x-user-email,x-auth-token,X-User-Email,X-Auth-Token'"
-              Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
-        DEFAULT_5XX:
-          ResponseParameters:
-            Headers:
-              Access-Control-Allow-Origin: "'*'"
-              Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Requested-With,Accept,x-user-email,x-auth-token,X-User-Email,X-Auth-Token'"
-              Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+      RetentionPolicy: Delete
 
 # ============================================
 # OUTPUTS
@@ -435,20 +292,20 @@ Resources:
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL
-    Value: !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  
+  UsersTableName:
+    Description: Users DynamoDB table
+    Value: !Ref UsersTable
   
   PoliciesTableName:
-    Description: Policies DynamoDB table name
+    Description: Policies DynamoDB table
     Value: !Ref PoliciesTable
   
   DocumentsTableName:
-    Description: Documents DynamoDB table name
+    Description: Documents DynamoDB table
     Value: !Ref DocumentsTable
   
   DocumentsBucketName:
-    Description: Documents S3 bucket name
+    Description: Documents S3 bucket
     Value: !Ref DocumentsBucket
-  
-  ProcessDocumentFunctionArn:
-    Description: Process Document Lambda ARN
-    Value: !GetAtt ProcessDocumentFunction.Arn
