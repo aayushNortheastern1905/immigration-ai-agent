@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, LogOut, FileText, Calendar, Upload, Filter, ChevronDown, ChevronUp, TrendingUp, AlertCircle, CheckCircle2 } from 'lucide-react';
 
-const API_URL = process.env.REACT_APP_API_URL || 'https://9uqxq6pvjj.execute-api.us-east-1.amazonaws.com/Prod';
+const API_URL = process.env.REACT_APP_API_URL || 'https://xzxx5l4658.execute-api.us-east-1.amazonaws.com/Prod';
 
 interface UserData {
   user_id: string;

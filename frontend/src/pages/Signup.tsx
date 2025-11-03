@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Mail, Lock, User, CheckCircle2, AlertCircle, ArrowLeft } from 'lucide-react';
 
-const API_URL = process.env.REACT_APP_API_URL || 'https://9uqxq6pvjj.execute-api.us-east-1.amazonaws.com/Prod';
+const API_URL = process.env.REACT_APP_API_URL || 'https://xzxx5l4658.execute-api.us-east-1.amazonaws.com/Prod';
 
 const Signup = () => {
   const [loading, setLoading] = useState(false);
