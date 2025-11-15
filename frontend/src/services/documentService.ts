@@ -2,9 +2,6 @@ import axios from 'axios';
 
 const API_URL = process.env.REACT_APP_API_URL;
 
-// ============================================
-// AUTH HELPER
-// ============================================
 const getAuthHeaders = () => {
   const user = localStorage.getItem('user');
   if (!user) {
@@ -14,14 +11,11 @@ const getAuthHeaders = () => {
   const userData = JSON.parse(user);
   return {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${userData.user_id}`, // Using user_id as token for now
+    'Authorization': `Bearer ${userData.user_id}`,
     'X-User-Email': userData.email,
   };
 };
 
-// ============================================
-// TYPES
-// ============================================
 export interface ExtractedField {
   value: string;
   confidence: number;
@@ -47,7 +41,7 @@ export interface DocumentStatus {
 export interface UploadUrlResponse {
   document_id: string;
   upload_url: string;
-  upload_fields: Record<string, string>;  // ← CHANGED: Made required (removed ?)
+  upload_fields: Record<string, string>; 
 }
 
 export interface Document {
@@ -59,9 +53,6 @@ export interface Document {
   extracted_data?: ExtractedData;
 }
 
-// ============================================
-// DOCUMENT SERVICE
-// ============================================
 class DocumentService {
   private static readonly MAX_POLL_ATTEMPTS = 30;
   private static readonly POLL_INTERVAL = 2000;
@@ -84,7 +75,7 @@ class DocumentService {
         }
       );
       
-      console.log('🔍 Upload URL Response:', response.data);  // ← ADDED: Debug log
+      console.log('Upload URL Response:', response.data);  
       return response.data.data;
     } catch (error: any) {
       console.error('Error requesting upload URL:', error);
@@ -92,54 +83,44 @@ class DocumentService {
     }
   }
 
-  // ============================================
-  // COMPLETELY REWRITTEN FUNCTION
-  // ============================================
   static async uploadToS3(
     file: File,
     uploadUrl: string,
-    uploadFields: Record<string, string>,  // ← ADDED: Now required parameter
+    uploadFields: Record<string, string>,  
     onProgress?: (progress: number) => void
   ): Promise<void> {
     try {
-      console.log('🔍 Starting S3 upload...');
-      console.log('🔍 Upload URL:', uploadUrl);
-      console.log('🔍 Upload fields:', uploadFields);
-      console.log('🔍 File:', file.name, file.type, file.size);
+      console.log('Starting S3 upload...');
+      console.log('Upload URL:', uploadUrl);
+      console.log('Upload fields:', uploadFields);
+      console.log('File:', file.name, file.type, file.size);
 
-      // Create FormData for multipart upload (S3 presigned POST requirement)
       const formData = new FormData();
       
-      // Add all fields from presigned POST FIRST
       Object.keys(uploadFields).forEach(key => {
         formData.append(key, uploadFields[key]);
-        console.log(`🔍 Field added: ${key}`);
+        console.log(`Field added: ${key}`);
       });
       
-      // Add file LAST (S3 requirement - file must be last in FormData)
       formData.append('file', file);
-      console.log('🔍 File added to FormData');
+      console.log('File added to FormData');
 
-      // Use POST instead of PUT (presigned POST, not presigned PUT)
       await axios.post(uploadUrl, formData, {
-        headers: {
-          // Don't manually set Content-Type
-          // Browser will set multipart/form-data with boundary automatically
-        },
+        headers: {},
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total && onProgress) {
             const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
             onProgress(percent);
-            console.log(`🔍 Upload progress: ${percent}%`);
+            console.log(`Upload progress: ${percent}%`);
           }
         },
       });
       
-      console.log('✅ S3 upload successful!');
+      console.log('S3 upload successful!');
     } catch (error: any) {
-      console.error('❌ Error uploading to S3:', error);
-      console.error('❌ Error response:', error.response?.data);
-      console.error('❌ Error status:', error.response?.status);
+      console.error('Error uploading to S3:', error);
+      console.error('Error response:', error.response?.data);
+      console.error('Error status:', error.response?.status);
       throw new Error('Failed to upload file');
     }
   }
@@ -213,7 +194,6 @@ class DocumentService {
     } catch (error: any) {
       console.error('Error fetching documents:', error);
       
-      // If 403, might be authentication issue - for now return empty array
       if (error.response?.status === 403) {
         console.warn('Authentication issue - returning empty array for MVP');
         return [];
